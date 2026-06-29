@@ -1,8 +1,12 @@
 # =============================================================================
 # Codex TLS Proxy Multi-Stage Dockerfile
 # =============================================================================
-# 独立 Rust 服务，用 reqwest + rustls 栈复刻 Codex CLI 的 TLS 指纹。
+# 独立 Rust 服务，用 reqwest + native-tls 栈复刻 Codex CLI 默认路径的 TLS 指纹。
 # sub2api 将 OpenAI 相关请求转发给本代理，由本代理通过账号配置的 proxy 发出。
+#
+# codex CLI 默认 OpenAI 请求走 native-tls（macOS=Secure Transport, Linux=OpenSSL,
+# Windows=SChannel），本代理对齐该默认路径。在 Alpine Linux 容器中 native-tls
+# 使用 OpenSSL。
 #
 # 构建（在 codex-tls-proxy/ 目录内执行）：
 #   cd codex-tls-proxy
@@ -33,7 +37,8 @@ ARG RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
 ENV RUSTUP_DIST_SERVER=${RUSTUP_DIST_SERVER}
 ENV RUSTUP_UPDATE_ROOT=${RUSTUP_UPDATE_ROOT}
 
-RUN apk add --no-cache musl-dev
+# native-tls 在 Alpine/musl 上需要 OpenSSL 开发库
+RUN apk add --no-cache openssl-dev openssl-libs-static
 
 WORKDIR /build
 
@@ -63,10 +68,10 @@ RUN cargo build --release --bin codex-tls-proxy && \
 FROM ${ALPINE_IMAGE}
 
 LABEL maintainer="sub2api"
-LABEL description="Codex TLS fingerprint proxy (reqwest + rustls)"
+LABEL description="Codex TLS fingerprint proxy (reqwest + native-tls)"
 
-# 安装运行时依赖：ca-certificates 用于 rustls-native-certs 读取系统根证书
-RUN apk add --no-cache ca-certificates tzdata && \
+# 安装运行时依赖：ca-certificates 用于 TLS 验证，openssl 用于 native-tls 后端
+RUN apk add --no-cache ca-certificates openssl-libs tzdata && \
     rm -rf /var/cache/apk/*
 
 # 创建非 root 用户

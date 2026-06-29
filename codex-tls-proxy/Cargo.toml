@@ -2,17 +2,22 @@
 name = "codex-tls-proxy"
 version = "0.1.0"
 edition = "2021"
-description = "TLS fingerprint proxy for OpenAI Codex requests, replicating codex CLI (reqwest + rustls) TLS stack"
+description = "TLS fingerprint proxy for OpenAI Codex requests, replicating codex CLI (reqwest + native-tls) TLS stack"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
 axum = { version = "0.8", features = ["json"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "json", "socks"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-rustls-native-certs = { version = "0.8" }
+# reqwest 对齐 codex CLI 默认路径：不设 default-features = false，
+# 保留 default-tls（native-tls），与 codex CLI workspace 配置一致。
+# codex CLI 默认 OpenAI 请求走 native-tls（macOS=Secure Transport, Linux=OpenSSL,
+# Windows=SChannel），只有配置 CODEX_CA_CERTIFICATE/SSL_CERT_FILE 时才切到 rustls。
+# socks 用于支持 SOCKS5 proxy。
+reqwest = { version = "0.12", features = ["stream", "json", "socks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+# IndexMap 保持 header JSON 解析顺序，避免 HashMap 遍历打乱 H2 HPACK 编码顺序
+indexmap = { version = "2", features = ["serde"] }
 tower = "0.5"
 hyper = "1"
 tracing = "0.1"

@@ -5,6 +5,11 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    // reqwest 默认走 native-tls（macOS=Secure Transport, Linux=OpenSSL, Windows=SChannel），
+    // 对齐 codex CLI 默认 OpenAI 请求路径。codex CLI 只有在配置了
+    // CODEX_CA_CERTIFICATE/SSL_CERT_FILE 时才切到 rustls，本代理对齐默认路径。
+    // native-tls 不需要手动安装 crypto provider。
+
     // 默认日志级别 info：未设置 RUST_LOG 时也能看到启动日志和 /forward 请求日志；
     // 设置了 RUST_LOG 则以其为准。
     tracing_subscriber::fmt()

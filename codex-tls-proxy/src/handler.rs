@@ -1,12 +1,13 @@
 // axum 路由与请求处理
 //
-// POST /forward: 接收 sub2api 转发的请求，用 reqwest + rustls 栈通过指定 proxy 发出，
+// POST /forward: 接收 sub2api 转发的请求，用 reqwest + native-tls 栈通过指定 proxy 发出，
 //                把上游响应（含 SSE 流）透传回 sub2api。
 // GET  /health:  健康检查。
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use indexmap::IndexMap;
 
 use axum::body::Body;
 use axum::extract::State;
@@ -40,9 +41,10 @@ pub struct ForwardRequest {
     /// 代理 URL，空字符串表示直连
     #[serde(default)]
     pub proxy_url: String,
-    /// 请求 headers，map<header_name, header_values[]>
+    /// 请求 headers，保持 JSON 解析顺序（IndexMap），
+    /// 避免 HashMap 遍历打乱 header 顺序导致 H2 HPACK 编码顺序与 codex CLI 不一致
     #[serde(default)]
-    pub headers: HashMap<String, Vec<String>>,
+    pub headers: IndexMap<String, Vec<String>>,
     /// 请求 body，base64 编码
     #[serde(default)]
     pub body: String,
@@ -96,10 +98,13 @@ async fn forward(
     State(state): State<AppState>,
     Json(req): Json<ForwardRequest>,
 ) -> Response {
-    // 记录请求入口：只打印 method/url/是否带 proxy，
-    // 不打印 headers、body、完整 proxy_url（可能含 token 或代理凭据）。
+    // 记录请求入口：打印 method/url/是否带 proxy/user-agent，
+    // 不打印 body、完整 proxy_url（可能含 token 或代理凭据）。
+    // user-agent 不含敏感凭据，打印用于排查客户端指纹伪装是否生效。
+    let start = Instant::now();
     let has_proxy = !req.proxy_url.is_empty();
-    tracing::info!(method = %req.method, url = %req.url, proxy = has_proxy, "forward: incoming request");
+    let user_agent = extract_header(&req.headers, "user-agent");
+    tracing::info!(method = %req.method, url = %req.url, proxy = has_proxy, user_agent = %user_agent, "forward: incoming request");
 
     // 解析 method
     let method = match reqwest::Method::from_bytes(req.method.as_bytes()) {
@@ -114,7 +119,7 @@ async fn forward(
     let client = match state.pool.get(&req.proxy_url).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!(url = %req.url, error = %e, "forward: build http client failed");
+            tracing::error!(url = %req.url, error = %e, elapsed_ms = start.elapsed().as_millis(), "forward: build http client failed");
             return error_response(
                 StatusCode::BAD_GATEWAY,
                 format!("failed to build http client for proxy {:?}: {e}", req.proxy_url),
@@ -159,16 +164,20 @@ async fn forward(
     let upstream_resp = match timeout(UPSTREAM_RESPONSE_HEADER_TIMEOUT, builder.send()).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
-            tracing::error!(url = %req.url, error = %e, "forward: upstream request failed");
+            // 展开完整 source 链：reqwest 顶层 Display 会丢掉真实原因，
+            // 偶发失败必须看到底层原因（对端关闭/连接被拒/超时/TLS 等）才能定位。
+            let detail = describe_reqwest_error(&e);
+            tracing::error!(url = %req.url, proxy = has_proxy, error = %detail, elapsed_ms = start.elapsed().as_millis(), "forward: upstream request failed");
             return error_response(
                 StatusCode::BAD_GATEWAY,
-                format!("upstream request failed: {e}"),
+                format!("upstream request failed: {detail}"),
             );
         }
         Err(_) => {
             tracing::error!(
                 url = %req.url,
                 timeout_secs = UPSTREAM_RESPONSE_HEADER_TIMEOUT.as_secs(),
+                elapsed_ms = start.elapsed().as_millis(),
                 "forward: upstream response header timeout"
             );
             return error_response(
@@ -184,7 +193,7 @@ async fn forward(
     // 透传响应
     let status = upstream_resp.status();
     let resp_headers = upstream_resp.headers().clone();
-    tracing::info!(url = %req.url, status = status.as_u16(), "forward: upstream responded");
+    tracing::info!(url = %req.url, status = status.as_u16(), elapsed_ms = start.elapsed().as_millis(), "forward: upstream responded");
 
     // 构建 axum 响应
     let mut axum_headers = HeaderMap::new();
@@ -214,4 +223,56 @@ fn error_response(status: StatusCode, msg: String) -> Response {
         Json(ForwardError { error: msg }),
     )
         .into_response()
+}
+
+/// 从 headers 中按大小写不敏感方式取首个值，缺失返回 "-"
+fn extract_header(headers: &IndexMap<String, Vec<String>>, name: &str) -> String {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .and_then(|(_, v)| v.first())
+        .map(|s| s.as_str())
+        .unwrap_or("-")
+        .to_string()
+}
+
+/// 展开 reqwest 错误的完整 source 链，并附带错误分类标记。
+///
+/// reqwest::Error 的 Display 只输出顶层信息（如 "error sending request for url (...)"），
+/// 真正原因（对端关闭连接/连接被拒/超时/TLS 握手失败/SOCKS 失败等）藏在 source() 链里。
+/// 偶发失败必须看到底层原因，才能区分两类问题：
+///   - 连接池复用了已被代理/上游关闭的旧连接（多为 request/body 类，提示连接被关闭）
+///   - 代理本身不稳定（connect/timeout 类）
+/// 因此这里展开整条链，并把 reqwest 的错误分类（connect/timeout/request/body/decode）一并打出。
+fn describe_reqwest_error(e: &reqwest::Error) -> String {
+    let mut chain = e.to_string();
+    let mut source = std::error::Error::source(e);
+    while let Some(err) = source {
+        chain.push_str(" -> ");
+        chain.push_str(&err.to_string());
+        source = err.source();
+    }
+
+    let mut kinds = Vec::new();
+    if e.is_connect() {
+        kinds.push("connect");
+    }
+    if e.is_timeout() {
+        kinds.push("timeout");
+    }
+    if e.is_request() {
+        kinds.push("request");
+    }
+    if e.is_body() {
+        kinds.push("body");
+    }
+    if e.is_decode() {
+        kinds.push("decode");
+    }
+
+    if kinds.is_empty() {
+        chain
+    } else {
+        format!("{chain} [kind={}]", kinds.join(","))
+    }
 }

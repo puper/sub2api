@@ -1,7 +1,10 @@
 // reqwest 客户端构建与缓存
 //
 // 按 proxy_url 缓存 reqwest::Client，避免每次请求都重建 TLS 连接池。
-// TLS 栈对齐 codex CLI：rustls-tls-native-roots。
+// TLS 栈对齐 codex CLI 默认路径：native-tls（macOS=Secure Transport, Linux=OpenSSL,
+// Windows=SChannel）。codex CLI 默认 OpenAI 请求不调 use_rustls_tls()，走 reqwest
+// 的 default-tls backend。只有配置 CODEX_CA_CERTIFICATE/SSL_CERT_FILE 时 codex CLI
+// 才切到 rustls，本代理对齐默认路径。
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -100,18 +103,20 @@ impl Default for ProxyClientPool {
 
 /// 构建 reqwest 客户端
 ///
-/// TLS 栈：rustls-tls-native-roots（与 codex CLI 一致）
+/// TLS 栈：native-tls（与 codex CLI 默认路径一致）
 /// proxy_url 为空时直连，非空时设置 reqwest 代理
 ///
-/// 超时策略：
-/// - connect_timeout: 30s（TCP + TLS 握手）
+/// 对齐 codex CLI 默认 builder 配置：
+/// - 不设 connect_timeout（codex CLI 默认路径也不设）
+/// - 不设 pool_idle_timeout（reqwest 默认 90s，与 codex CLI 一致）
 /// - 不设 .timeout()（总超时会截断 SSE 流式响应）
 /// - 响应头超时由 handler 层用 tokio::time::timeout 包裹 send() 实现
+///
+/// 不设默认 User-Agent：codex CLI 的 reqwest 也不设默认 UA，
+/// User-Agent 由 sub2api 侧按 codex CLI 指纹设置。
+/// 若设默认 UA，当 sub2api 漏传 User-Agent 时会泄露本代理标识。
 fn build_client(proxy_url: &str) -> Result<Client, reqwest::Error> {
-    let mut builder = Client::builder()
-        .pool_idle_timeout(Duration::from_secs(90))
-        .connect_timeout(Duration::from_secs(30))
-        .user_agent("codex-tls-proxy/0.1.0");
+    let mut builder = Client::builder();
 
     if !proxy_url.is_empty() {
         builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
