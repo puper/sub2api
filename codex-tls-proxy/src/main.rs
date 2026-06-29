@@ -5,8 +5,10 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    // 默认日志级别 info：未设置 RUST_LOG 时也能看到启动日志和 /forward 请求日志；
+    // 设置了 RUST_LOG 则以其为准。
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
     // 监听地址，默认 127.0.0.1:18900

@@ -161,6 +161,18 @@ services:
       - GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE=${GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE:-reject}
       - GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS=${GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS:-30}
       - GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS=${GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS:-100}
+
+      # =======================================================================
+      # Codex TLS Fingerprint Proxy (optional, separate service)
+      # =======================================================================
+      # When enabled, OpenAI OAuth (ChatGPT/Codex) upstream requests — including
+      # quota query / rate-limit reset-credit — are routed through the Rust
+      # codex-tls-proxy service to mimic the Codex CLI TLS fingerprint.
+      # Deploy it via codex-tls-proxy/docker-compose.yml on the SAME docker
+      # network, and keep the URL as the service name (NOT 127.0.0.1, which
+      # inside this container would point to sub2api itself).
+      - CODEX_TLS_PROXY_ENABLED=${CODEX_TLS_PROXY_ENABLED:-false}
+      - CODEX_TLS_PROXY_URL=${CODEX_TLS_PROXY_URL:-http://codex-tls-proxy:18900}
     depends_on:
       postgres:
         condition: service_healthy

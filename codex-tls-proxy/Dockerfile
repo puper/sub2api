@@ -82,8 +82,9 @@ COPY --from=builder --chown=codex:codex /build/target/release/codex-tls-proxy /a
 EXPOSE 18900
 
 # 健康检查
+# 用 127.0.0.1 而非 localhost，避免容器内 localhost 解析到 IPv6 ::1 导致连接拒绝
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget -q -T 3 -O /dev/null http://localhost:18900/health || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:18900/health || exit 1
 
 USER codex
 

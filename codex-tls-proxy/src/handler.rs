@@ -96,20 +96,29 @@ async fn forward(
     State(state): State<AppState>,
     Json(req): Json<ForwardRequest>,
 ) -> Response {
+    // 记录请求入口：只打印 method/url/是否带 proxy，
+    // 不打印 headers、body、完整 proxy_url（可能含 token 或代理凭据）。
+    let has_proxy = !req.proxy_url.is_empty();
+    tracing::info!(method = %req.method, url = %req.url, proxy = has_proxy, "forward: incoming request");
+
     // 解析 method
     let method = match reqwest::Method::from_bytes(req.method.as_bytes()) {
         Ok(m) => m,
-        Err(e) => return error_response(StatusCode::BAD_REQUEST, format!("invalid method: {e}")),
+        Err(e) => {
+            tracing::warn!(url = %req.url, error = %e, "forward: invalid method");
+            return error_response(StatusCode::BAD_REQUEST, format!("invalid method: {e}"));
+        }
     };
 
     // 获取 reqwest 客户端（按 proxy_url 缓存）
     let client = match state.pool.get(&req.proxy_url).await {
         Ok(c) => c,
         Err(e) => {
+            tracing::error!(url = %req.url, error = %e, "forward: build http client failed");
             return error_response(
                 StatusCode::BAD_GATEWAY,
                 format!("failed to build http client for proxy {:?}: {e}", req.proxy_url),
-            )
+            );
         }
     };
 
@@ -135,7 +144,10 @@ async fn forward(
     if !req.body.is_empty() {
         let body_bytes = match base64::engine::general_purpose::STANDARD.decode(&req.body) {
             Ok(b) => b,
-            Err(e) => return error_response(StatusCode::BAD_REQUEST, format!("invalid base64 body: {e}")),
+            Err(e) => {
+                tracing::warn!(url = %req.url, error = %e, "forward: invalid base64 body");
+                return error_response(StatusCode::BAD_REQUEST, format!("invalid base64 body: {e}"));
+            }
         };
         builder = builder.body(body_bytes);
     }
@@ -147,25 +159,32 @@ async fn forward(
     let upstream_resp = match timeout(UPSTREAM_RESPONSE_HEADER_TIMEOUT, builder.send()).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
+            tracing::error!(url = %req.url, error = %e, "forward: upstream request failed");
             return error_response(
                 StatusCode::BAD_GATEWAY,
                 format!("upstream request failed: {e}"),
-            )
+            );
         }
         Err(_) => {
+            tracing::error!(
+                url = %req.url,
+                timeout_secs = UPSTREAM_RESPONSE_HEADER_TIMEOUT.as_secs(),
+                "forward: upstream response header timeout"
+            );
             return error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 format!(
                     "upstream response header timeout after {}s",
                     UPSTREAM_RESPONSE_HEADER_TIMEOUT.as_secs()
                 ),
-            )
+            );
         }
     };
 
     // 透传响应
     let status = upstream_resp.status();
     let resp_headers = upstream_resp.headers().clone();
+    tracing::info!(url = %req.url, status = status.as_u16(), "forward: upstream responded");
 
     // 构建 axum 响应
     let mut axum_headers = HeaderMap::new();

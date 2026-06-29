@@ -11,6 +11,12 @@
 #
 # 注意：本服务需要与 sub2api 在同一个 Docker 网络中，
 # 或通过宿主机端口映射（默认 127.0.0.1:18900）访问。
+#
+# 网络说明：
+#   extra_hosts 把 host.docker.internal 映射到宿主机 IP，
+#   使 Rust 代理能访问宿主机上运行的 proxy（如 Clash/V2Ray）。
+#   账号配置的 proxy URL 如果用 172.17.0.1（默认 bridge 网关），
+#   在自定义网络中可能不可达，建议改用 host.docker.internal。
 # =============================================================================
 
 services:
@@ -24,11 +30,16 @@ services:
     ports:
       # 只暴露到本地回环，避免外部直接访问
       - "127.0.0.1:18900:18900"
+    extra_hosts:
+      # 让容器内 host.docker.internal 指向宿主机
+      # Linux 需要 Docker 20.10+，docker-compose 会自动添加 host-gateway
+      - "host.docker.internal:host-gateway"
     environment:
       - CODEX_TLS_PROXY_ADDR=0.0.0.0:18900
       - TZ=${TZ:-Asia/Shanghai}
     healthcheck:
-      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://localhost:18900/health"]
+      # 用 127.0.0.1 而非 localhost，避免容器内 localhost 解析到 IPv6 ::1
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:18900/health"]
       interval: 30s
       timeout: 5s
       retries: 3
