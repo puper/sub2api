@@ -5,8 +5,8 @@
 # sub2api 将 OpenAI 相关请求转发给本代理，由本代理通过账号配置的 proxy 发出。
 #
 # codex CLI 默认 OpenAI 请求走 native-tls（macOS=Secure Transport, Linux=OpenSSL,
-# Windows=SChannel），本代理对齐该默认路径。在 Alpine Linux 容器中 native-tls
-# 使用 OpenSSL。
+# Windows=SChannel），本代理对齐该默认路径。在 Ubuntu 容器中 native-tls 使用
+# OpenSSL 3.3.x（glibc），与大多数 codex CLI Linux 用户环境一致。
 #
 # 构建（在 codex-tls-proxy/ 目录内执行）：
 #   cd codex-tls-proxy
@@ -22,8 +22,8 @@
 #   CODEX_TLS_PROXY_ADDR=0.0.0.0:18900  监听地址（容器内需用 0.0.0.0）
 # =============================================================================
 
-ARG RUST_IMAGE=rust:1.88-alpine
-ARG ALPINE_IMAGE=alpine:3.21
+ARG RUST_IMAGE=rust:1.88-slim
+ARG RUNTIME_IMAGE=ubuntu:24.04
 
 # -----------------------------------------------------------------------------
 # Stage 1: Build
@@ -37,8 +37,10 @@ ARG RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
 ENV RUSTUP_DIST_SERVER=${RUSTUP_DIST_SERVER}
 ENV RUSTUP_UPDATE_ROOT=${RUSTUP_UPDATE_ROOT}
 
-# native-tls 在 Alpine/musl 上需要 OpenSSL 开发库
-RUN apk add --no-cache openssl-dev openssl-libs-static
+# native-tls 需要 OpenSSL 开发库和 pkg-config
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libssl-dev pkg-config && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
@@ -56,27 +58,27 @@ RUN mkdir -p src && \
 # 复制源码并编译
 COPY src ./src
 
-# tests 目录可选：存在则复制，不存在则跳过
-COPY tests ./tests
-
 RUN cargo build --release --bin codex-tls-proxy && \
     strip target/release/codex-tls-proxy
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime
 # -----------------------------------------------------------------------------
-FROM ${ALPINE_IMAGE}
+FROM ${RUNTIME_IMAGE}
 
 LABEL maintainer="sub2api"
 LABEL description="Codex TLS fingerprint proxy (reqwest + native-tls)"
 
-# 安装运行时依赖：ca-certificates 用于 TLS 验证，openssl 用于 native-tls 后端
-RUN apk add --no-cache ca-certificates openssl-libs tzdata && \
-    rm -rf /var/cache/apk/*
+# 安装运行时依赖：ca-certificates 用于 TLS 验证，libssl3 提供 native-tls 所需的
+# libssl.so.3 / libcrypto.so.3 运行时库，tzdata 提供时区数据
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates libssl3t64 tzdata wget && \
+    rm -rf /var/lib/apt/lists/*
 
 # 创建非 root 用户
-RUN addgroup -g 1000 codex && \
-    adduser -u 1000 -G codex -s /bin/sh -D codex
+# Ubuntu 24.04 基础镜像已存在 GID 1000（ubuntu 用户），用 1001 避免冲突
+RUN groupadd -g 1001 codex && \
+    useradd -u 1001 -g codex -s /usr/sbin/nologin -M codex
 
 WORKDIR /app
 
