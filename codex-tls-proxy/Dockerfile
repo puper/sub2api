@@ -4,14 +4,18 @@
 # 独立 Rust 服务，用 reqwest + rustls 栈复刻 Codex CLI 的 TLS 指纹。
 # sub2api 将 OpenAI 相关请求转发给本代理，由本代理通过账号配置的 proxy 发出。
 #
-# 构建：
-#   docker build -t codex-tls-proxy:latest -f codex-tls-proxy/Dockerfile .
+# 构建（在 codex-tls-proxy/ 目录内执行）：
+#   cd codex-tls-proxy
+#   docker build -t codex-tls-proxy:latest .
+#
+# 或在项目根目录执行：
+#   docker build -t codex-tls-proxy:latest -f codex-tls-proxy/Dockerfile codex-tls-proxy/
 #
 # 运行：
 #   docker run -d --name codex-tls-proxy -p 127.0.0.1:18900:18900 codex-tls-proxy:latest
 #
 # 环境变量：
-#   CODEX_TLS_PROXY_ADDR=127.0.0.1:18900  监听地址
+#   CODEX_TLS_PROXY_ADDR=0.0.0.0:18900  监听地址（容器内需用 0.0.0.0）
 # =============================================================================
 
 ARG RUST_IMAGE=rust:1.88-alpine
@@ -34,7 +38,7 @@ RUN apk add --no-cache musl-dev
 WORKDIR /build
 
 # 先复制 Cargo.toml 利用 Docker 层缓存
-COPY codex-tls-proxy/Cargo.toml ./Cargo.toml
+COPY Cargo.toml ./Cargo.toml
 
 # 创建空的 src 目录，预编译依赖（利用层缓存）
 # 预编译后删除 src 和 target 中编译产物，但保留下载的依赖缓存
@@ -45,8 +49,10 @@ RUN mkdir -p src && \
     rm -rf src target/release/codex-tls-proxy target/release/deps/codex_tls_proxy* target/release/.fingerprint/codex*
 
 # 复制源码并编译
-COPY codex-tls-proxy/src ./src
-COPY codex-tls-proxy/tests ./tests
+COPY src ./src
+
+# tests 目录可选：存在则复制，不存在则跳过
+COPY tests ./tests
 
 RUN cargo build --release --bin codex-tls-proxy && \
     strip target/release/codex-tls-proxy
@@ -72,7 +78,7 @@ WORKDIR /app
 # 复制二进制
 COPY --from=builder --chown=codex:codex /build/target/release/codex-tls-proxy /app/codex-tls-proxy
 
-# 监听端口（默认 127.0.0.1:18900，可通过 CODEX_TLS_PROXY_ADDR 覆盖）
+# 监听端口
 EXPOSE 18900
 
 # 健康检查

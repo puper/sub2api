@@ -16,8 +16,8 @@
 services:
   codex-tls-proxy:
     build:
-      context: ..
-      dockerfile: codex-tls-proxy/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     image: codex-tls-proxy:latest
     container_name: codex-tls-proxy
     restart: unless-stopped
