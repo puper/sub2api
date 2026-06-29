@@ -139,7 +139,7 @@ var ProviderSet = wire.NewSet(
 	NewProxyExitInfoProber,
 	NewClaudeUsageFetcher,
 	NewClaudeOAuthClient,
-	NewHTTPUpstream,
+	NewCodexTLSProxyHTTPUpstream, // codex-tls-proxy: 包装 HTTPUpstream，OpenAI OAuth 请求走 Rust 代理
 	NewOpenAIOAuthClient,
 	NewGrokOAuthClient,
 	NewGeminiOAuthClient,

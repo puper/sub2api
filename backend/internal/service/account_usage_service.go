@@ -666,7 +666,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	client, err := httppool.GetClient(httppool.Options{
+	client, err := httppool.GetCodexTLSProxyClient(httppool.Options{
 		ProxyURL:              proxyURL,
 		Timeout:               15 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,

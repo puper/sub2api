@@ -59,7 +59,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 }
 
 func providePrivacyClientFactory() service.PrivacyClientFactory {
-	return repository.CreatePrivacyReqClient
+	return repository.CodexTLSProxyPrivacyClientFactory
 }
 
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {

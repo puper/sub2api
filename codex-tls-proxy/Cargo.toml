@@ -1,0 +1,25 @@
+[package]
+name = "codex-tls-proxy"
+version = "0.1.0"
+edition = "2021"
+description = "TLS fingerprint proxy for OpenAI Codex requests, replicating codex CLI (reqwest + rustls) TLS stack"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+axum = { version = "0.8", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "json", "socks"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-native-certs = { version = "0.8" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+tower = "0.5"
+hyper = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+mockito = "1"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
