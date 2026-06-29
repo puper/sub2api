@@ -1,0 +1,42 @@
+# =============================================================================
+# Codex TLS Proxy Docker Compose
+# =============================================================================
+# 独立部署 Codex TLS 指纹代理服务。
+#
+# 用法：
+#   1. docker compose -f codex-tls-proxy/docker-compose.yml up -d
+#   2. 在 sub2api 的环境变量中设置：
+#      CODEX_TLS_PROXY_ENABLED=true
+#      CODEX_TLS_PROXY_URL=http://codex-tls-proxy:18900
+#
+# 注意：本服务需要与 sub2api 在同一个 Docker 网络中，
+# 或通过宿主机端口映射（默认 127.0.0.1:18900）访问。
+# =============================================================================
+
+services:
+  codex-tls-proxy:
+    build:
+      context: ..
+      dockerfile: codex-tls-proxy/Dockerfile
+    image: codex-tls-proxy:latest
+    container_name: codex-tls-proxy
+    restart: unless-stopped
+    ports:
+      # 只暴露到本地回环，避免外部直接访问
+      - "127.0.0.1:18900:18900"
+    environment:
+      - CODEX_TLS_PROXY_ADDR=0.0.0.0:18900
+      - TZ=${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://localhost:18900/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - sub2api-network
+
+networks:
+  sub2api-network:
+    external: true
+    name: sub2api_sub2api-network

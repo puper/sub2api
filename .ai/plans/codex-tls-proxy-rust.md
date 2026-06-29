@@ -223,3 +223,7 @@ resp, err := s.forwardOpenAIUpstream(ctx, upstreamReq, proxyURL, account)
     - Go httpclient 包：7 个测试通过
     - Go repository 包：14 个测试通过（含 privacy client 3 个 + upstream 6 个 + client 5 个）
     - go build ./... 通过
+  - 新增 Docker 镜像构建支持：
+    - `codex-tls-proxy/Dockerfile`：多阶段构建（rust:1.88-alpine → alpine:3.21），release 二进制 4.6MB
+    - `codex-tls-proxy/docker-compose.yml`：独立部署配置，接入 sub2api-network
+    - 已验证：docker build 成功，容器启动正常，/health 返回 200
